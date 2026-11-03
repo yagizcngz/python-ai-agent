@@ -38,8 +38,11 @@ from textual.widgets import (
 )
 
 from ..config import (
+    DEFAULT_API_TIMEOUT,
     DEFAULT_LOCAL_BASE_URL,
+    DEFAULT_MAX_STEPS,
     DEFAULT_MODEL,
+    DEFAULT_SHELL_TIMEOUT,
     POPULAR_LOCAL_MODELS,
     RECOMMENDED_FREE_MODELS,
     WORKSPACE_DIR,
@@ -1128,9 +1131,13 @@ class AgentTUIApp(App):
         is_local: bool = False,
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
+        max_steps: int = DEFAULT_MAX_STEPS,
+        shell_timeout: int = DEFAULT_SHELL_TIMEOUT,
+        api_timeout: float = DEFAULT_API_TIMEOUT,
         **kwargs,
     ):
         super().__init__(**kwargs)
+        self.api_timeout = api_timeout
         self.model = model
         self.workspace_dir = (workspace_dir or WORKSPACE_DIR).resolve()
         self.is_local = is_local
@@ -1160,6 +1167,7 @@ class AgentTUIApp(App):
             api_key=self.api_key,
             base_url=self.base_url,
             is_local=self.is_local,
+            timeout=self.api_timeout,
         )
         self.memory = ConversationMemory()
         self.tools = ToolRegistry([
@@ -1167,13 +1175,17 @@ class AgentTUIApp(App):
             WriteTool(self.workspace_dir),
             EditTool(self.workspace_dir),
             ListDirTool(self.workspace_dir),
-            BashTool(self.workspace_dir),
+            BashTool(self.workspace_dir, timeout=shell_timeout),
         ])
         self.agent = Agent(
             client=self.client,
             model=self.model,
             tools=self.tools,
             memory=self.memory,
+            max_steps=max_steps,
+            client_factory=lambda key: create_client(
+                api_key=key, base_url=self.base_url, is_local=self.is_local, timeout=self.api_timeout
+            ),
             event_handler=self.on_agent_event,
             key_manager=self.key_manager,
             is_local=self.is_local,
@@ -1422,6 +1434,7 @@ class AgentTUIApp(App):
                 api_key=self.api_key,
                 base_url=self.base_url,
                 is_local=self.is_local,
+                timeout=self.api_timeout,
             )
             self.agent.client = self.client
             self.agent.model = self.model
@@ -1686,7 +1699,7 @@ class AgentTUIApp(App):
                 success, new_key, msg = self.key_manager.rotate_key()
                 if success:
                     self.api_key = new_key
-                    self.client = create_client(api_key=new_key, base_url=self.base_url, is_local=self.is_local)
+                    self.client = create_client(api_key=new_key, base_url=self.base_url, is_local=self.is_local, timeout=self.api_timeout)
                     self.agent.client = self.client
                     self.notify(f"API key quota reached. Auto-switched to key {self.key_manager.current_index + 1}/{self.key_manager.total_keys}.", severity="warning")
                     new_usage = fetch_account_usage(new_key, base_url=self.base_url)
@@ -1799,6 +1812,9 @@ def run_tui(
     is_local: bool = False,
     base_url: Optional[str] = None,
     api_key: Optional[str] = None,
+    max_steps: int = DEFAULT_MAX_STEPS,
+    shell_timeout: int = DEFAULT_SHELL_TIMEOUT,
+    api_timeout: float = DEFAULT_API_TIMEOUT,
 ) -> None:
     """Launch the Textual TUI Application."""
     app = AgentTUIApp(
@@ -1807,5 +1823,8 @@ def run_tui(
         is_local=is_local,
         base_url=base_url,
         api_key=api_key,
+        max_steps=max_steps,
+        shell_timeout=shell_timeout,
+        api_timeout=api_timeout,
     )
     app.run()

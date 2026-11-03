@@ -97,7 +97,7 @@ def main() -> None:
     parser.add_argument(
         "-m", "--model",
         default=None,
-        help="Model identifier (defaults to $env:OPENROUTER_MODEL or nvidia/nemotron-3.5-lightning:free)",
+        help=f"Model identifier (defaults to $env:OPENROUTER_MODEL or {DEFAULT_MODEL})",
     )
     parser.add_argument(
         "--repl", "--cli",
@@ -230,15 +230,20 @@ def main() -> None:
                 workspace_dir=workspace_path,
                 is_local=args.local,
                 base_url=base_url,
+                max_steps=args.max_steps,
+                shell_timeout=args.timeout,
+                api_timeout=args.api_timeout,
             )
             return
         except Exception as e:
             print(f"Error launching TUI: {e}", file=sys.stderr)
             sys.exit(1)
 
-    # Initialize client for CLI / REPL
+    # Initialize client for CLI / REPL; KeyManager also finds Gemini/Groq/DeepSeek keys
+    key_manager = None if args.local else KeyManager(base_url=base_url)
     try:
         client = create_client(
+            api_key=key_manager.get_current_key() if key_manager else None,
             base_url=base_url,
             is_local=args.local,
             timeout=args.api_timeout,
@@ -246,6 +251,8 @@ def main() -> None:
     except Exception as e:
         print(f"Configuration Error: {e}", file=sys.stderr)
         sys.exit(1)
+
+    rich_console = RichAgentConsole(quiet=args.quiet)
 
     # Initialize tools & agent
     tools = ToolRegistry([
@@ -256,9 +263,6 @@ def main() -> None:
         BashTool(workspace_path, timeout=args.timeout),
     ])
 
-    rich_console = RichAgentConsole(quiet=args.quiet)
-    key_manager = None if args.local else KeyManager(base_url=base_url)
-
     agent = Agent(
         client=client,
         model=model,
@@ -268,6 +272,9 @@ def main() -> None:
         key_manager=key_manager,
         is_local=args.local,
         base_url=base_url,
+        client_factory=lambda key: create_client(
+            api_key=key, base_url=base_url, is_local=args.local, timeout=args.api_timeout
+        ),
     )
 
     if args.prompt:
