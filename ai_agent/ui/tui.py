@@ -5,6 +5,7 @@ Includes on-the-fly Model Switcher (Alt+M), File Previewer with X close button,
 Confirm Quit modal, full-screen Chat expand/restore toggling, and Command Palette (Alt+P).
 """
 
+import threading
 from pathlib import Path
 from typing import List, Optional
 
@@ -198,6 +199,22 @@ class ConfirmQuitModal(ModalScreen[bool]):
 
     def action_cancel(self) -> None:
         self.dismiss(False)
+
+
+class ConfirmCommandModal(ConfirmQuitModal):
+    """Asks the user before the agent runs a Bash command (reuses ConfirmQuitModal styles)."""
+
+    def __init__(self, command: str, **kwargs):
+        super().__init__(**kwargs)
+        self.command = command
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="confirm-quit-dialog"):
+            yield Label("Run Bash Command?", id="confirm-quit-title")
+            yield Label(Text(self.command))
+            with Horizontal(id="confirm-quit-btn-bar"):
+                yield Button("Yes, Run", variant="error", id="btn-confirm-quit", classes="confirm-btn")
+                yield Button("Reject", variant="default", id="btn-cancel-quit", classes="confirm-btn")
 
 
 class ModelSelectModal(ModalScreen[Optional[dict]]):
@@ -1134,6 +1151,7 @@ class AgentTUIApp(App):
         max_steps: int = DEFAULT_MAX_STEPS,
         shell_timeout: int = DEFAULT_SHELL_TIMEOUT,
         api_timeout: float = DEFAULT_API_TIMEOUT,
+        confirm_bash: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -1175,7 +1193,11 @@ class AgentTUIApp(App):
             WriteTool(self.workspace_dir),
             EditTool(self.workspace_dir),
             ListDirTool(self.workspace_dir),
-            BashTool(self.workspace_dir, timeout=shell_timeout),
+            BashTool(
+                self.workspace_dir,
+                timeout=shell_timeout,
+                approve=self._approve_command if confirm_bash else None,
+            ),
         ])
         self.agent = Agent(
             client=self.client,
@@ -1192,6 +1214,19 @@ class AgentTUIApp(App):
             base_url=self.base_url,
         )
         self.is_busy = False
+
+    def _approve_command(self, command: str) -> bool:
+        """Called from the agent worker thread; blocks until the user answers the modal."""
+        answer = {"ok": False}
+        done = threading.Event()
+
+        def on_answer(ok: Optional[bool]) -> None:
+            answer["ok"] = bool(ok)
+            done.set()
+
+        self.call_from_thread(self.push_screen, ConfirmCommandModal(command), on_answer)
+        done.wait()
+        return answer["ok"]
 
     def action_maximize(self) -> None:
         """Maximize main content panels, never individual small buttons."""
@@ -1815,6 +1850,7 @@ def run_tui(
     max_steps: int = DEFAULT_MAX_STEPS,
     shell_timeout: int = DEFAULT_SHELL_TIMEOUT,
     api_timeout: float = DEFAULT_API_TIMEOUT,
+    confirm_bash: bool = False,
 ) -> None:
     """Launch the Textual TUI Application."""
     app = AgentTUIApp(
@@ -1826,5 +1862,6 @@ def run_tui(
         max_steps=max_steps,
         shell_timeout=shell_timeout,
         api_timeout=api_timeout,
+        confirm_bash=confirm_bash,
     )
     app.run()

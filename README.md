@@ -19,7 +19,7 @@ An autonomous, multi-modal interface AI agent built in Python leveraging native 
   * `Write`: Creates and updates files with automatic directory provisioning.
   * `Edit`: Fast in-place search-and-replace text editing without rewriting entire files.
   * `ListDir`: Native tree/directory inspection without spawning shell sub-processes.
-  * `Bash`: Sandboxed terminal commands with strict timeout guards (`--timeout`) and dynamic Python runtime detection.
+  * `Bash`: Terminal commands started in the workspace, with a timeout that kills the whole process tree (`--timeout`), dynamic Python runtime detection, and optional per-command approval (`--confirm`). Note: Bash is not sandboxed like the file tools; a command can reach outside the workspace.
 * **Resilient Tool Parsing for Small & Local Models:**
   * Intercepts and parses tool calls emitted as text by local models (Qwen XML `<function><name>...</name>`, `<tool_call>`, markdown code fences, and raw JSON).
   * Automatically maps common tool aliases and hallucinations (e.g. `ListFilesCount`, `list_files`, `dir`, `read_file`, `shell`).
@@ -245,6 +245,7 @@ python app/main.py --base-url "https://api.groq.com/openai/v1" -m "llama-3.3-70b
 | | `--max-steps` | Maximum reasoning iterations before halting | `25` |
 | | `--timeout` | Shell command timeout in seconds | `30` |
 | | `--api-timeout`| Timeout for API LLM calls in seconds | `30.0` |
+| | `--confirm` | Ask for approval (y/N, or a dialog in the TUI) before every Bash command | `False` |
 | `-q` | `--quiet` | Output clean plaintext answer without Rich panels | `False` |
 | `-h` | `--help` | Show help and exit | |
 

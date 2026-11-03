@@ -16,6 +16,8 @@ if sys.platform == "win32":
 
 from pathlib import Path
 
+from rich.markup import escape
+
 from .config import (
     BASE_URL,
     DEFAULT_API_TIMEOUT,
@@ -98,6 +100,11 @@ def main() -> None:
         "-m", "--model",
         default=None,
         help=f"Model identifier (defaults to $env:OPENROUTER_MODEL or {DEFAULT_MODEL})",
+    )
+    parser.add_argument(
+        "--confirm",
+        action="store_true",
+        help="Ask for approval before every Bash command (file tools stay sandboxed either way)",
     )
     parser.add_argument(
         "--repl", "--cli",
@@ -233,6 +240,7 @@ def main() -> None:
                 max_steps=args.max_steps,
                 shell_timeout=args.timeout,
                 api_timeout=args.api_timeout,
+                confirm_bash=args.confirm,
             )
             return
         except Exception as e:
@@ -254,13 +262,17 @@ def main() -> None:
 
     rich_console = RichAgentConsole(quiet=args.quiet)
 
+    def approve_command(command: str) -> bool:
+        reply = rich_console.console.input(f"[bold yellow]Run Bash command?[/bold yellow] {escape(command)} [y/N] ")
+        return reply.strip().lower() in ("y", "yes")
+
     # Initialize tools & agent
     tools = ToolRegistry([
         ReadTool(workspace_path),
         WriteTool(workspace_path),
         EditTool(workspace_path),
         ListDirTool(workspace_path),
-        BashTool(workspace_path, timeout=args.timeout),
+        BashTool(workspace_path, timeout=args.timeout, approve=approve_command if args.confirm else None),
     ])
 
     agent = Agent(

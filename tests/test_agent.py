@@ -201,6 +201,40 @@ def test_custom_provider_validation_and_usage():
 
 
 
+def test_agent_waits_and_retries_same_key_on_429(tmp_path: Path, monkeypatch):
+    import ai_agent.core.agent as agent_mod
+    sleeps = []
+    monkeypatch.setattr(agent_mod.time, "sleep", lambda s: sleeps.append(s))
+
+    rate_err = Exception("Rate limit exceeded: 15 requests per minute")
+    rate_err.status_code = 429
+    ok = MagicMock()
+    ok.choices = [make_mock_choice(content="done")]
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.side_effect = [rate_err, ok]
+    key_manager = MagicMock()
+
+    agent = Agent(client=mock_client, model="m", tools=ToolRegistry([]), key_manager=key_manager)
+    assert agent.run("hi") == "done"
+    assert sleeps == [2.0]
+    key_manager.rotate_key.assert_not_called()
+
+
+def test_memory_trims_old_tool_outputs(monkeypatch):
+    import ai_agent.core.memory as memory_mod
+    monkeypatch.setattr(memory_mod, "MAX_CONTEXT_CHARS", 1000)
+    memory = ConversationMemory(system_prompt="sys")
+    for i in range(10):
+        memory.add_assistant_message(tool_calls=[{"id": f"c{i}", "function": {"name": "Read", "arguments": "{}"}}])
+        memory.add_tool_result(f"c{i}", "x" * 500)
+
+    messages = memory.get_messages()
+    assert len(messages) == 21
+    assert messages[2]["content"] == memory_mod.TRIMMED_TOOL_OUTPUT
+    assert messages[-1]["content"] == "x" * 500
+    assert sum(len(str(m.get("content") or "")) for m in messages) <= 1000 + 500 * 3
+
+
 def test_console_renders_tool_output_with_brackets():
     from rich.console import Console
     from ai_agent.ui.console import RichAgentConsole

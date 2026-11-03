@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 import json
 import re
+import time
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 import uuid
 from openai import OpenAI
@@ -107,6 +108,19 @@ def extract_tool_or_answer(text: str, available_tools: Set[str]) -> Tuple[str, A
     return ("answer", text, None)
 
 
+RATE_LIMIT_WAITS = (2.0, 6.0)  # seconds between same-key retries on HTTP 429
+MAX_RETRY_AFTER = 30.0
+
+
+def _retry_after_seconds(e: Exception) -> Optional[float]:
+    """Read a numeric Retry-After header from an API error, capped so the agent never stalls long."""
+    try:
+        value = float(e.response.headers.get("retry-after"))  # type: ignore[attr-defined]
+    except Exception:
+        return None
+    return min(max(value, 0.0), MAX_RETRY_AFTER)
+
+
 class AgentEventType(str, Enum):
     THINKING = "thinking"
     TOOL_CALL = "tool_call"
@@ -159,6 +173,15 @@ class Agent:
             except Exception:
                 pass
 
+    def _tool_usage_summary(self) -> str:
+        """Count tool calls in history, e.g. 'Read (2x), Bash (1x)'."""
+        counts: Dict[str, int] = {}
+        for msg in self.memory.messages:
+            for tc in msg.get("tool_calls") or []:
+                name = tc.get("function", {}).get("name", "Tool")
+                counts[name] = counts.get(name, 0) + 1
+        return ", ".join(f"{k} ({v}x)" for k, v in counts.items()) if counts else "None"
+
     def run(self, prompt: str) -> str:
         """
         Execute an autonomous task to completion.
@@ -171,24 +194,11 @@ class Agent:
         while True:
             self.current_step += 1
             if self.current_step > self.max_steps:
-                tool_summary = []
-                for msg in self.memory.messages:
-                    if msg.get("role") == "assistant" and msg.get("tool_calls"):
-                        for tc in msg["tool_calls"]:
-                            fn = tc.get("function", {})
-                            name = fn.get("name", "Tool")
-                            tool_summary.append(name)
-
-                counts = {}
-                for t in tool_summary:
-                    counts[t] = counts.get(t, 0) + 1
-                tools_str = ", ".join(f"{k} ({v}x)" for k, v in counts.items()) if counts else "None"
-
                 msg = (
                     f"Limit reached: Agent reached maximum steps ({self.max_steps}). Stopping loop.\n\n"
                     f"**Summary of progress:**\n"
                     f"- Steps executed: {self.max_steps}/{self.max_steps}\n"
-                    f"- Tools executed: {tools_str}\n"
+                    f"- Tools executed: {self._tool_usage_summary()}\n"
                     f"- Status: Partial progress preserved in workspace.\n\n"
                     f"*Tip: Prompt 'Continue' to have the agent resume working from where it stopped.*"
                 )
@@ -199,6 +209,7 @@ class Agent:
             self._emit(AgentEventType.THINKING, f"Consulting model '{self.model}'...")
 
             chat = None
+            waits_left = len(RATE_LIMIT_WAITS)
             while True:
                 try:
                     chat = self.client.chat.completions.create(
@@ -208,7 +219,16 @@ class Agent:
                     )
                     break
                 except Exception as e:
+                    # Per-minute limits clear quickly: wait and retry the same key before burning it.
+                    is_daily = any(s in str(e).lower() for s in ("daily", "per day", "perday"))
+                    if not self.is_local and waits_left and not is_daily and getattr(e, "status_code", None) == 429:
+                        delay = _retry_after_seconds(e) or RATE_LIMIT_WAITS[-waits_left]
+                        waits_left -= 1
+                        self._emit(AgentEventType.THINKING, f"Rate limited, waiting {delay:g}s before retrying...")
+                        time.sleep(delay)
+                        continue
                     if self.key_manager and is_quota_or_rate_limit_error(e):
+                        waits_left = len(RATE_LIMIT_WAITS)
                         success, new_key, msg = self.key_manager.rotate_key()
                         if success:
                             self._emit(AgentEventType.THINKING, f"{msg} Retrying request...")
@@ -223,23 +243,11 @@ class Agent:
                                 )
                             continue
                         else:
-                            tool_summary = []
-                            for m in self.memory.messages:
-                                if m.get("role") == "assistant" and m.get("tool_calls"):
-                                    for tc in m["tool_calls"]:
-                                        fn = tc.get("function", {})
-                                        name = fn.get("name", "Tool")
-                                        tool_summary.append(name)
-                            counts = {}
-                            for t in tool_summary:
-                                counts[t] = counts.get(t, 0) + 1
-                            tools_str = ", ".join(f"{k} ({v}x)" for k, v in counts.items()) if counts else "None"
-
                             err_msg = (
                                 f"API Limit Reached: {msg}\n\n"
                                 f"**Summary of progress before running out of requests:**\n"
                                 f"- Steps completed: {self.current_step - 1} steps\n"
-                                f"- Tools executed: {tools_str}\n"
+                                f"- Tools executed: {self._tool_usage_summary()}\n"
                                 f"- Workspace status: All changes, files, and command outputs up to this point are preserved on disk.\n\n"
                                 f"*Tip: Add another API key to API_KEYS_OPEN_ROUTER.txt or switch to local models (--local), then type 'Continue' to resume.*"
                             )

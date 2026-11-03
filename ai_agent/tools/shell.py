@@ -8,7 +8,7 @@ import signal
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 from ..config import DEFAULT_SHELL_TIMEOUT
 from .base import BaseTool
 
@@ -42,9 +42,15 @@ class BashTool(BaseTool):
         },
     }
 
-    def __init__(self, workspace_dir: Path, timeout: int = DEFAULT_SHELL_TIMEOUT):
+    def __init__(
+        self,
+        workspace_dir: Path,
+        timeout: int = DEFAULT_SHELL_TIMEOUT,
+        approve: Optional[Callable[[str], bool]] = None,
+    ):
         self.workspace_dir = Path(workspace_dir).resolve()
         self.timeout = timeout
+        self.approve = approve
 
     def execute(self, **kwargs) -> str:
         command = kwargs.get("command") or kwargs.get("cmd")
@@ -56,6 +62,8 @@ class BashTool(BaseTool):
             return "Error: No command provided to execute."
 
         command = command.strip()
+        if self.approve and not self.approve(command):
+            return "Command rejected by user. Do not retry it; ask the user or try a different approach."
         command = normalize_python_command(command)
 
         try:

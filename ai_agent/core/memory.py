@@ -5,6 +5,11 @@ Conversation memory and context management for the AI Agent.
 import platform
 from typing import Any, Dict, List, Optional
 
+from ..config import MAX_CONTEXT_CHARS
+
+KEEP_RECENT_MESSAGES = 6
+TRIMMED_TOOL_OUTPUT = "[Old tool output trimmed to save context. Re-run the tool if you need it again.]"
+
 
 def build_default_system_prompt() -> str:
     """Dynamically build system instructions aware of current host OS and available tools."""
@@ -105,5 +110,16 @@ class ConversationMemory:
         self.total_completion_tokens += completion_tokens
 
     def get_messages(self) -> List[Dict[str, Any]]:
-        """Return full conversation message history."""
+        """Return conversation history, trimming old tool outputs if it exceeds the context budget."""
+        self._trim_old_tool_outputs()
         return list(self.messages)
+
+    def _trim_old_tool_outputs(self) -> None:
+        # Shrinks content only; never drops messages, so tool_call/tool_result pairs stay valid.
+        total = sum(len(str(m.get("content") or "")) for m in self.messages)
+        for msg in self.messages[:-KEEP_RECENT_MESSAGES]:
+            if total <= MAX_CONTEXT_CHARS:
+                return
+            if msg.get("role") == "tool" and msg.get("content") != TRIMMED_TOOL_OUTPUT:
+                total -= len(str(msg["content"])) - len(TRIMMED_TOOL_OUTPUT)
+                msg["content"] = TRIMMED_TOOL_OUTPUT

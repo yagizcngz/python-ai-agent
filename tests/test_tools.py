@@ -127,6 +127,15 @@ def test_bash_timeout_kills_child_processes(tmp_path: Path):
     assert time.time() - start < 8
 
 
+def test_bash_tool_rejected_command_does_not_run(tmp_path: Path):
+    seen = []
+    bash_tool = BashTool(tmp_path, approve=lambda cmd: seen.append(cmd) or False)
+    res = bash_tool.execute(command='echo hi > made.txt')
+    assert "rejected" in res
+    assert seen == ["echo hi > made.txt"]
+    assert not (tmp_path / "made.txt").exists()
+
+
 def test_write_empty_file(tmp_path: Path):
     res = WriteTool(tmp_path).execute(file_path="empty.txt", content="")
     assert "written successfully" in res

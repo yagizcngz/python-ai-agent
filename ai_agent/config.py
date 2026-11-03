@@ -50,6 +50,8 @@ DEFAULT_MAX_STEPS = 25
 DEFAULT_SHELL_TIMEOUT = 30
 DEFAULT_API_TIMEOUT = 30.0
 MAX_TOOL_OUTPUT_CHARS = 4000
+# ~30k tokens; old tool outputs are trimmed past this so small free models don't overflow
+MAX_CONTEXT_CHARS = int(os.getenv("AI_AGENT_MAX_CONTEXT_CHARS", "120000"))
 
 
 def get_api_key(allow_fallback: bool = True) -> str:
