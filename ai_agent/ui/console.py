@@ -5,9 +5,11 @@ Rich terminal formatting, panels, syntax highlighting, and event handlers.
 from typing import Any, Dict, Optional
 from rich.console import Console
 from rich.markdown import Markdown
+from rich.markup import escape
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
+from rich.text import Text
 
 from ..core.agent import AgentEvent, AgentEventType
 
@@ -27,7 +29,7 @@ class RichAgentConsole:
             self.console.print(f"\n[bold cyan]--- Step {event.step} ---[/bold cyan]")
 
         elif event.event_type == AgentEventType.THINKING:
-            self.console.print(f"[dim italic]Thinking: {event.data}[/dim italic]")
+            self.console.print(f"[dim italic]Thinking: {escape(str(event.data))}[/dim italic]")
 
         elif event.event_type == AgentEventType.TOOL_CALL:
             data = event.data
@@ -50,7 +52,7 @@ class RichAgentConsole:
             preview = result if len(result) < 1500 else result[:1500] + "\n... [Output preview clipped in console]"
             self.console.print(
                 Panel(
-                    preview,
+                    Text(preview),
                     title=f"[bold blue][Tool Result] {fn_name}[/bold blue]",
                     border_style="blue",
                     padding=(0, 1),
@@ -79,13 +81,13 @@ class RichAgentConsole:
                     )
                 self.console.print(
                     Panel(
-                        f"[bold red]{err_text}[/bold red]{sugg_text}",
+                        f"[bold red]{escape(err_text)}[/bold red]{sugg_text}",
                         title="[bold red]Execution Error[/bold red]",
                         border_style="red",
                     )
                 )
             else:
-                self.console.print(f"[bold red]Error: {err_data}[/bold red]")
+                self.console.print(f"[bold red]Error: {escape(str(err_data))}[/bold red]")
 
     def print_usage_summary(
         self,

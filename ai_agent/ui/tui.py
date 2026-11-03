@@ -9,8 +9,10 @@ from pathlib import Path
 from typing import List, Optional
 
 from rich.markdown import Markdown as RichMarkdown
+from rich.markup import escape
 from rich.panel import Panel
 from rich.syntax import Syntax
+from rich.text import Text
 
 from textual import work
 from textual.app import App, ComposeResult, SystemCommand
@@ -1723,7 +1725,7 @@ class AgentTUIApp(App):
         elif event.event_type == AgentEventType.THINKING:
             self.current_status = "THINKING"
             self.update_telemetry()
-            chat_log.write(f"[dim #fbbf24]► [ T H I N K I N G ] {event.data} [ █ ][/dim #fbbf24]")
+            chat_log.write(f"[dim #fbbf24]► [ T H I N K I N G ] {escape(str(event.data))} [ █ ][/dim #fbbf24]")
             tool_log.write(f"[dim italic]--- Step {event.step}: Thinking... ---[/dim italic]")
 
         elif event.event_type == AgentEventType.TOOL_CALL:
@@ -1762,7 +1764,7 @@ class AgentTUIApp(App):
             # Route tool outputs exclusively to the dedicated Tool Activity panel
             tool_log.write(
                 Panel(
-                    preview,
+                    Text(preview),
                     title=f"[bold #38bdf8][ R E S U L T : {fn_name} ][/bold #38bdf8]",
                     border_style="#38bdf8",
                 )
@@ -1784,7 +1786,7 @@ class AgentTUIApp(App):
             err_msg = err_data.get("error") if isinstance(err_data, dict) else str(err_data)
             chat_log.write(
                 Panel(
-                    f"[bold red]{err_msg}[/bold red]",
+                    f"[bold red]{escape(str(err_msg))}[/bold red]",
                     title="[bold red][ E R R O R ][/bold red]",
                     border_style="red",
                 )

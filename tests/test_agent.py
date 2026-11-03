@@ -199,3 +199,15 @@ def test_custom_provider_validation_and_usage():
     usage = fetch_account_usage(api_key="any-custom-key", base_url="https://api.groq.com/openai/v1")
     assert usage is None
 
+
+
+def test_console_renders_tool_output_with_brackets():
+    from rich.console import Console
+    from ai_agent.ui.console import RichAgentConsole
+
+    console = Console(record=True, width=80)
+    RichAgentConsole(console=console).handle_event(
+        AgentEvent(AgentEventType.TOOL_RESULT, 1, {"name": "Read", "result": "x = a[/b]\ny: list[int]"})
+    )
+    text = console.export_text()
+    assert "a[/b]" in text and "list[int]" in text
