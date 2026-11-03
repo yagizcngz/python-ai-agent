@@ -115,3 +115,29 @@ def test_tool_registry_malformed_json():
     registry.register(dummy)
     res_bad_json = registry.dispatch(dummy.name, "not json at all")
     assert "Malformed JSON arguments" in res_bad_json
+
+
+def test_bash_timeout_kills_child_processes(tmp_path: Path):
+    import time
+    # The shell's child holds the output pipe; the timeout must kill the whole tree, not wait for it.
+    bash_tool = BashTool(tmp_path, timeout=1)
+    start = time.time()
+    res = bash_tool.execute(command='python -c "import time; time.sleep(20)"')
+    assert "timed out" in res
+    assert time.time() - start < 8
+
+
+def test_write_empty_file(tmp_path: Path):
+    res = WriteTool(tmp_path).execute(file_path="empty.txt", content="")
+    assert "written successfully" in res
+    assert (tmp_path / "empty.txt").read_bytes() == b""
+
+
+def test_edit_keeps_line_endings(tmp_path: Path):
+    (tmp_path / "lf.py").write_bytes(b"a = 1\nb = 2\n")
+    (tmp_path / "crlf.py").write_bytes(b"a = 1\r\nb = 2\r\n")
+    edit_tool = EditTool(tmp_path)
+    edit_tool.execute(file_path="lf.py", old_content="b = 2", new_content="b = 3")
+    edit_tool.execute(file_path="crlf.py", old_content="b = 2", new_content="b = 3")
+    assert (tmp_path / "lf.py").read_bytes() == b"a = 1\nb = 3\n"
+    assert (tmp_path / "crlf.py").read_bytes() == b"a = 1\r\nb = 3\r\n"

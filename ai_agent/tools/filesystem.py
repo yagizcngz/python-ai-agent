@@ -94,7 +94,7 @@ class WriteTool(BaseTool):
 
     def execute(self, **kwargs) -> str:
         file_path = kwargs.get("file_path") or kwargs.get("path") or kwargs.get("filename")
-        content = kwargs.get("content") or kwargs.get("file_content")
+        content = kwargs["content"] if "content" in kwargs else kwargs.get("file_content")
 
         if not file_path:
             return "Error: Missing required argument 'file_path'."
@@ -105,7 +105,7 @@ class WriteTool(BaseTool):
             target = resolve_sandbox_path(file_path, self.workspace_dir)
             target.parent.mkdir(parents=True, exist_ok=True)
 
-            with open(target, "w", encoding="utf-8", errors="replace") as f:
+            with open(target, "w", encoding="utf-8", errors="replace", newline="") as f:
                 f.write(content)
 
             return f"File '{file_path}' written successfully ({len(content)} characters)."
@@ -160,7 +160,8 @@ class EditTool(BaseTool):
             if not target.is_file():
                 return f"Error: File '{file_path}' does not exist or is a directory."
 
-            with open(target, "r", encoding="utf-8", errors="replace") as f:
+            # newline="" keeps the file's own line endings (no LF -> CRLF rewrite on Windows)
+            with open(target, "r", encoding="utf-8", errors="replace", newline="") as f:
                 current_text = f.read()
 
             occurrences = current_text.count(old_content)
@@ -176,7 +177,7 @@ class EditTool(BaseTool):
                 )
 
             updated_text = current_text.replace(old_content, new_content, 1)
-            with open(target, "w", encoding="utf-8", errors="replace") as f:
+            with open(target, "w", encoding="utf-8", errors="replace", newline="") as f:
                 f.write(updated_text)
 
             return f"File '{file_path}' edited successfully."
@@ -247,6 +248,7 @@ class ListDirTool(BaseTool):
                     dirs[:] = [d for d in dirs if d not in self.IGNORE_DIRS]
                     curr_depth = len(Path(root).parts) - base_depth
                     if curr_depth > max_depth:
+                        dirs[:] = []
                         continue
                     indent = "  " * (curr_depth + 1)
                     rel_p = Path(root).relative_to(target)

@@ -4,6 +4,7 @@ Sandboxed shell command execution with execution timeouts and safety bounds.
 
 import os
 import re
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -58,17 +59,32 @@ class BashTool(BaseTool):
         command = normalize_python_command(command)
 
         try:
-            process = subprocess.run(
+            process = subprocess.Popen(
                 command,
                 shell=True,
-                capture_output=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
                 cwd=str(self.workspace_dir),
-                timeout=self.timeout,
                 errors="replace",
+                start_new_session=sys.platform != "win32",
             )
-            stdout = process.stdout.strip()
-            stderr = process.stderr.strip()
+            try:
+                stdout, stderr = process.communicate(timeout=self.timeout)
+            except subprocess.TimeoutExpired:
+                # Kill the whole process tree: killing only the shell leaves children holding the pipes.
+                if sys.platform == "win32":
+                    subprocess.run(
+                        ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                        capture_output=True,
+                    )
+                else:
+                    os.killpg(process.pid, signal.SIGKILL)
+                process.communicate()
+                raise
+            stdout = stdout.strip()
+            stderr = stderr.strip()
 
             result_parts = []
             if process.returncode != 0:
