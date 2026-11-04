@@ -2,7 +2,7 @@
 Rich terminal formatting, panels, syntax highlighting, and event handlers.
 """
 
-from typing import Any, Dict, Optional
+from typing import Optional
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.markup import escape

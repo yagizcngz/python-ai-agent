@@ -9,7 +9,6 @@ from ..config import (
     BASE_URL,
     DEFAULT_API_TIMEOUT,
     DEFAULT_LOCAL_BASE_URL,
-    DEFAULT_OPENROUTER_BASE_URL,
     PROJECT_ROOT,
     RECOMMENDED_FREE_MODELS,
     get_api_key,

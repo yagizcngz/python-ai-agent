@@ -1,7 +1,7 @@
 import io
 import json
 import urllib.request
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from ai_agent.core.system_info import (
     check_local_model_installed,

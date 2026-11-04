@@ -17,7 +17,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "pyyaml>=6.0",
     "rich>=13.0.0",
-    "textual>=0.50.0",
+    "textual>=8.0.0",
 ]
 
 [project.optional-dependencies]
@@ -27,6 +27,11 @@ dev = [
 
 [project.scripts]
 ai-agent = "ai_agent.cli:main"
+
+# app/ is only a launcher script, not part of the package; without this, setuptools refuses
+# to build ("Multiple top-level packages discovered") and `pip install -e .` fails.
+[tool.setuptools.packages.find]
+include = ["ai_agent*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

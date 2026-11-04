@@ -1,5 +1,4 @@
 import asyncio
-from pathlib import Path
 from textual.widgets import Button, Input, Label
 from ai_agent.ui.tui import AgentTUIApp, ModelSelectModal, FilePreviewModal, ConfirmQuitModal, KeysModal, LocalModelGuideModal
 
@@ -446,7 +445,13 @@ def test_model_select_modal_clicking_option_does_not_open_guide_until_select_pre
     asyncio.run(_run())
 
 
-def test_model_select_modal_installed_local_model_switches_immediately():
+def test_model_select_modal_installed_local_model_switches_immediately(monkeypatch):
+    # Fake a running Ollama with the model installed so the test doesn't depend on this machine
+    monkeypatch.setattr(
+        "ai_agent.ui.tui.check_local_model_installed",
+        lambda *a, **k: (True, "ready", ["qwen2.5-coder:1.5b"]),
+    )
+
     async def _run():
         from textual.widgets import OptionList
         app = AgentTUIApp()

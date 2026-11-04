@@ -73,7 +73,7 @@ An autonomous, multi-modal interface AI agent built in Python leveraging native 
 
 | Tool | Parameters | Description |
 | :--- | :--- | :--- |
-| `Read` | `file_path` (string) | Reads file contents within the workspace sandbox. |
+| `Read` | `file_path` (string), `offset`, `limit` (int, optional) | Reads file contents within the workspace sandbox; `offset`/`limit` read a line range of long files. Binary files are detected and refused. |
 | `Write` | `file_path` (string), `content` (string) | Creates/overwrites files, provisioning any required parent directories. |
 | `Edit` | `file_path` (string), `old_content` (string), `new_content` (string) | Performs surgical in-place text replacement in an existing file. |
 | `ListDir` | `directory_path` (string, optional), `recursive` (bool, optional) | Inspects files and directories inside the sandbox without shell overhead. |
@@ -155,6 +155,7 @@ python app/main.py
   * **Model (Alt+M):** Open the interactive Model Switcher dialog with category tabs (`Recommended`, `All Cloud Free`, `Local Ollama`), live installed Ollama detection, and zero-latency local caching.
   * **Send (Enter):** Submit current prompt.
   * **Reset (Ctrl+R):** Clear conversation context and reset token telemetry.
+  * **Stop (Alt+S):** Stop the running task after its current step; the work done so far is kept.
   * **Palette (Alt+P):** Open Textual's command palette for theme switching and screenshot capture.
   * **Keys (F1 / ?):** Open the dedicated Keyboard Shortcuts modal with clean list and [ X ] close button.
   * **Quit (Esc):** Bottom-bar button or Esc prompts with a Confirm Exit modal before quitting.
@@ -168,7 +169,7 @@ python app/main.py --repl
 ```
 ```text
 Python AI Agent -- Interactive REPL
-Type your prompt and press Enter. Commands: /reset, /usage, /exit
+Type your prompt and press Enter. Ctrl+C during a task cancels it. Commands: /reset, /usage, /exit
 
 User > Create a python file called calculate.py that calculates factorials.
 ...
@@ -255,8 +256,9 @@ python app/main.py --base-url "https://api.groq.com/openai/v1" -m "llama-3.3-70b
 
 Run the full `pytest` test suite:
 ```powershell
-pytest -v
+py -3 -m pytest -v
 ```
+GitHub Actions runs the same suite on Windows and Linux with Python 3.9 and 3.13 (`.github/workflows/tests.yml`).
 Tests cover:
 * Path sandboxing & directory traversal prevention (`tests/test_sandbox.py`)
 * Tool operations (`Read`, `Write`, `Edit`, `ListDir`, `Bash`, timeouts, aliases, YAML arguments) (`tests/test_tools.py`)
@@ -270,7 +272,8 @@ Tests cover:
 ## Security & Containment
 
 * **Path Sandbox:** All operations are resolved against the workspace root and strictly checked using `Path.is_relative_to()`. Traversal attempts (`../` or external absolute paths) immediately raise a `PermissionError`.
-* **Execution Timeout:** All shell commands are enforced with a strict execution timeout (default: 30s) to prevent frozen processes from blocking the agent.
+* **Execution Timeout:** All shell commands are enforced with a strict execution timeout (default: 30s); on timeout the whole process tree is killed so frozen processes cannot block the agent.
+* **Command Approval:** `--confirm` asks before every `Bash` command. Without it, Bash runs with your user's permissions and is not limited to the workspace.
 * **Secrets Security:** Keys are loaded via `.env` files and environment variables, keeping plaintext credentials out of version control.
 
 ---

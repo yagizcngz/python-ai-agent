@@ -9,7 +9,7 @@ import shutil
 import sys
 import urllib.request
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 
 def get_system_specs() -> Dict[str, any]:
