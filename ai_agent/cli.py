@@ -32,7 +32,6 @@ from .config import (
 from .core.agent import Agent
 from .core.client import create_client, fetch_account_usage, fetch_models
 from .core.keys import KeyManager
-from .core.memory import ConversationMemory
 from .tools.base import ToolRegistry
 from .tools.filesystem import EditTool, ListDirTool, ReadTool, WriteTool
 from .tools.shell import BashTool
@@ -44,7 +43,7 @@ def run_interactive_repl(agent: Agent, rich_console: RichAgentConsole) -> None:
     """Run multi-turn conversational REPL in the terminal."""
     rich_console.console.print("\n[bold cyan]Python AI Agent -- Interactive REPL[/bold cyan]")
     rich_console.console.print(
-        "[dim]Type your prompt and press Enter. Commands: [bold]/reset[/bold] (clear context), "
+        "[dim]Type your prompt and press Enter. Ctrl+C during a task cancels it. Commands: [bold]/reset[/bold] (clear context), "
         "[bold]/usage[/bold] (view token counts), [bold]/exit[/bold] or [bold]Ctrl+C[/bold] to quit.[/dim]\n"
     )
 
@@ -74,7 +73,11 @@ def run_interactive_repl(agent: Agent, rich_console: RichAgentConsole) -> None:
                 )
                 continue
 
-            agent.run(prompt)
+            try:
+                agent.run(prompt)
+            except KeyboardInterrupt:
+                rich_console.console.print("\n[yellow]Task cancelled. Type a new prompt, or 'Continue' to resume.[/yellow]\n")
+                continue
             is_custom = not agent.is_local and not is_openrouter_url(agent.base_url)
             rich_console.print_usage_summary(
                 agent.memory.total_prompt_tokens,
@@ -291,7 +294,11 @@ def main() -> None:
 
     if args.prompt:
         # Single-shot CLI execution
-        answer = agent.run(args.prompt)
+        try:
+            answer = agent.run(args.prompt)
+        except KeyboardInterrupt:
+            print("\nCancelled.", file=sys.stderr)
+            sys.exit(130)
         if args.quiet:
             print(answer)
         else:

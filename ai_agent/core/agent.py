@@ -6,8 +6,9 @@ from dataclasses import dataclass
 from enum import Enum
 import json
 import re
+import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Optional, Set, Tuple
 import uuid
 from openai import OpenAI
 
@@ -164,6 +165,7 @@ class Agent:
         self.base_url = base_url
         self.client_factory = client_factory
         self.current_step = 0
+        self._stop_requested = threading.Event()
 
     def _emit(self, event_type: AgentEventType, data: Any) -> None:
         """Emit an event if a handler is registered."""
@@ -182,16 +184,37 @@ class Agent:
                 counts[name] = counts.get(name, 0) + 1
         return ", ".join(f"{k} ({v}x)" for k, v in counts.items()) if counts else "None"
 
+    def request_stop(self) -> None:
+        """Ask a running task to stop after the current model call or tool (thread-safe)."""
+        self._stop_requested.set()
+
+    def _stopped_answer(self) -> str:
+        self._stop_requested.clear()
+        msg = "Task stopped by user. Work done so far is kept; type 'Continue' to resume."
+        self._emit(AgentEventType.ERROR, msg)
+        return msg
+
     def run(self, prompt: str) -> str:
         """
         Execute an autonomous task to completion.
         Maintains memory across multiple turns if run repeatedly.
         """
+        self._stop_requested.clear()
+        try:
+            return self._run(prompt)
+        except KeyboardInterrupt:
+            # Answer any unanswered tool calls so the next request is still a valid conversation
+            self.memory.close_pending_tool_calls("Cancelled by user (Ctrl+C).")
+            raise
+
+    def _run(self, prompt: str) -> str:
         self.memory.add_user_message(prompt)
         self.current_step = 0
         openai_tools = self.tools.get_openai_tools()
 
         while True:
+            if self._stop_requested.is_set():
+                return self._stopped_answer()
             self.current_step += 1
             if self.current_step > self.max_steps:
                 msg = (
@@ -306,7 +329,10 @@ class Agent:
                     })
 
                     # Dispatch through tool registry
-                    result = self.tools.dispatch(fn_name, fn_args)
+                    if self._stop_requested.is_set():
+                        result = "Skipped: task stopped by user."
+                    else:
+                        result = self.tools.dispatch(fn_name, fn_args)
 
                     self._emit(AgentEventType.TOOL_RESULT, {
                         "id": tool_call.id,

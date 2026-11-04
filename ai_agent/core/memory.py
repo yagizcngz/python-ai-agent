@@ -104,6 +104,20 @@ class ConversationMemory:
             "content": content,
         })
 
+    def close_pending_tool_calls(self, note: str) -> None:
+        """Add a placeholder result for tool calls left unanswered by an interrupted run.
+        APIs reject a history where an assistant tool call has no matching tool message."""
+        for idx in range(len(self.messages) - 1, -1, -1):
+            msg = self.messages[idx]
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                answered = {m.get("tool_call_id") for m in self.messages[idx + 1:] if m.get("role") == "tool"}
+                for tc in msg["tool_calls"]:
+                    if tc["id"] not in answered:
+                        self.add_tool_result(tc["id"], note)
+                return
+            if msg.get("role") == "user":
+                return
+
     def record_usage(self, prompt_tokens: int = 0, completion_tokens: int = 0) -> None:
         """Record token usage metrics from an API response."""
         self.total_prompt_tokens += prompt_tokens

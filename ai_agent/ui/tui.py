@@ -28,7 +28,6 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
-    Footer,
     Header,
     Input,
     Label,
@@ -45,7 +44,6 @@ from ..config import (
     DEFAULT_MODEL,
     DEFAULT_SHELL_TIMEOUT,
     POPULAR_LOCAL_MODELS,
-    RECOMMENDED_FREE_MODELS,
     WORKSPACE_DIR,
     get_provider_description,
     is_openrouter_url,
@@ -836,6 +834,7 @@ class KeysModal(ModalScreen[None]):
             ("Alt+M", "Model", "Open interactive AI Model Switcher dialog"),
             ("Alt+P", "Palette", "Open Command Palette (search commands & themes)"),
             ("Ctrl+R", "Reset", "Reset conversation context & token usage"),
+            ("Alt+S", "Stop", "Stop the running task after the current step"),
             ("Esc", "Quit", "Prompt confirmation before quitting application"),
             ("Enter", "Send", "Submit prompt or instruction to agent"),
         ]
@@ -1139,6 +1138,7 @@ class AgentTUIApp(App):
         Binding("alt+r", "refresh_files", "Refresh workspace files"),
         Binding("alt+m", "switch_model", "Model switcher dialog"),
         Binding("ctrl+r", "reset_chat", "Reset conversation & tokens"),
+        Binding("alt+s", "stop_task", "Stop the running task"),
     ]
 
     def __init__(
@@ -1225,7 +1225,9 @@ class AgentTUIApp(App):
             done.set()
 
         self.call_from_thread(self.push_screen, ConfirmCommandModal(command), on_answer)
-        done.wait()
+        while not done.wait(0.5):
+            if not self.is_running or self.agent._stop_requested.is_set():
+                return False  # app closed or task stopped while the dialog was open
         return answer["ok"]
 
     def action_maximize(self) -> None:
@@ -1451,6 +1453,9 @@ class AgentTUIApp(App):
 
     def switch_to_model(self, model_config: dict) -> None:
         """Switch active model and client configuration."""
+        if self.is_busy:
+            self.notify("A task is running. Stop it first (Alt+S), then switch models.", severity="warning")
+            return
         new_model = model_config["model"]
         is_local = model_config.get("is_local", False)
         base_url = model_config.get("base_url")
@@ -1500,8 +1505,19 @@ class AgentTUIApp(App):
         except Exception as e:
             self.notify(f"Failed to switch model: {e}", title="Error", severity="error")
 
+    def action_stop_task(self) -> None:
+        """Ask the running agent to stop after its current model call or tool."""
+        if not self.is_busy:
+            self.notify("No task is running.")
+            return
+        self.agent.request_stop()
+        self.notify("Stopping after the current step...", severity="warning")
+
     def action_reset_chat(self) -> None:
         """Reset conversation context."""
+        if self.is_busy:
+            self.notify("A task is running. Stop it first (Alt+S).", severity="warning")
+            return
         self.memory.reset()
         self.query_one("#chat-log", RichLog).write("[italic cyan]-- Conversation context reset --[/italic cyan]")
         self.query_one("#tool-log", RichLog).write("[italic cyan]-- Tool activity reset --[/italic cyan]")
@@ -1625,7 +1641,7 @@ class AgentTUIApp(App):
         # Log User prompt in the clean chat area
         chat_log.write(
             Panel(
-                prompt,
+                Text(prompt),
                 title="[bold #38bdf8][ U S E R ][/bold #38bdf8]",
                 border_style="#38bdf8",
             )
@@ -1649,7 +1665,7 @@ class AgentTUIApp(App):
 
     def _handle_error(self, err_text: str) -> None:
         chat_log = self.query_one("#chat-log", RichLog)
-        chat_log.write(f"[bold red]Error: {err_text}[/bold red]")
+        chat_log.write(f"[bold red]Error: {escape(err_text)}[/bold red]")
 
     def _finish_task(self) -> None:
         self.is_busy = False
@@ -1720,6 +1736,8 @@ class AgentTUIApp(App):
         import time
         if delay > 0:
             time.sleep(delay)
+        # The agent may have rotated keys mid-task; report usage for the key now in use
+        self.api_key = self.key_manager.get_current_key() or self.api_key
         usage = fetch_account_usage(self.api_key, base_url=self.base_url)
         if not usage:
             return
@@ -1736,7 +1754,7 @@ class AgentTUIApp(App):
                     self.api_key = new_key
                     self.client = create_client(api_key=new_key, base_url=self.base_url, is_local=self.is_local, timeout=self.api_timeout)
                     self.agent.client = self.client
-                    self.notify(f"API key quota reached. Auto-switched to key {self.key_manager.current_index + 1}/{self.key_manager.total_keys}.", severity="warning")
+                    self.call_from_thread(self.notify, f"API key quota reached. Auto-switched to key {self.key_manager.current_index + 1}/{self.key_manager.total_keys}.", severity="warning")
                     new_usage = fetch_account_usage(new_key, base_url=self.base_url)
                     if new_usage and new_usage.get("free_model_daily_requests"):
                         new_daily = new_usage["free_model_daily_requests"]

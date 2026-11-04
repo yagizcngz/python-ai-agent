@@ -245,3 +245,57 @@ def test_console_renders_tool_output_with_brackets():
     )
     text = console.export_text()
     assert "a[/b]" in text and "list[int]" in text
+
+
+def test_agent_stop_request_skips_remaining_tools(tmp_path: Path):
+    calls = []
+    tc1, tc2 = MagicMock(id="c1"), MagicMock(id="c2")
+    for tc in (tc1, tc2):
+        tc.function.name = "Write"
+        tc.function.arguments = '{"file_path": "x.txt", "content": "hi"}'
+    step = MagicMock()
+    step.choices = [make_mock_choice(content=None, tool_calls=[tc1, tc2])]
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = step
+
+    agent = Agent(client=mock_client, model="m", tools=ToolRegistry([WriteTool(tmp_path)]))
+
+    def on_event(e):
+        if e.event_type == AgentEventType.TOOL_RESULT:
+            calls.append(e.data["result"])
+            agent.request_stop()  # user presses stop while the first tool runs
+
+    agent.event_handler = on_event
+    assert "stopped by user" in agent.run("go")
+    assert "written successfully" in calls[0]
+    assert calls[1] == "Skipped: task stopped by user."
+    assert mock_client.chat.completions.create.call_count == 1
+    # Next run starts clean
+    mock_client.chat.completions.create.return_value = MagicMock(choices=[make_mock_choice(content="ok")])
+    assert agent.run("again") == "ok"
+
+
+def test_ctrl_c_during_tool_leaves_valid_history(tmp_path: Path):
+    class InterruptTool(WriteTool):
+        name = "Boom"
+
+        def execute(self, **kwargs):
+            raise KeyboardInterrupt
+
+    tc = MagicMock(id="c1")
+    tc.function.name = "Boom"
+    tc.function.arguments = "{}"
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = MagicMock(
+        choices=[make_mock_choice(content=None, tool_calls=[tc])]
+    )
+    agent = Agent(client=mock_client, model="m", tools=ToolRegistry([InterruptTool(tmp_path)]))
+    try:
+        agent.run("go")
+    except KeyboardInterrupt:
+        pass
+    else:
+        raise AssertionError("KeyboardInterrupt should propagate to the caller")
+    last = agent.memory.messages[-1]
+    assert last["role"] == "tool" and last["tool_call_id"] == "c1"
+    assert "Cancelled" in last["content"]
