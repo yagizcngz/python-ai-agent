@@ -4,7 +4,8 @@ Sandboxed filesystem tools for Read, Write, Edit, and ListDir.
 
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import List
+from ..config import MAX_TOOL_OUTPUT_CHARS
 from .base import BaseTool
 
 
@@ -33,14 +34,25 @@ class ReadTool(BaseTool):
     """Safely read file contents inside workspace."""
 
     name = "Read"
-    description = "Read and return the contents of a file within the workspace sandbox."
+    description = (
+        "Read and return the contents of a file within the workspace sandbox. "
+        "For long files, pass offset/limit to read a range of lines."
+    )
     parameters = {
         "type": "object",
         "properties": {
             "file_path": {
                 "type": "string",
                 "description": "Relative path to the file to read (e.g. 'main.py' or 'src/utils.py').",
-            }
+            },
+            "offset": {
+                "type": "integer",
+                "description": "1-based line number to start reading from (optional).",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum number of lines to return (optional).",
+            },
         },
         "required": ["file_path"],
     }
@@ -60,9 +72,28 @@ class ReadTool(BaseTool):
             if target.is_dir():
                 return f"Error: '{file_path}' is a directory, not a file. Use ListDir to inspect directories."
 
-            with open(target, "r", encoding="utf-8", errors="replace") as f:
-                content = f.read()
-            return content
+            raw = target.read_bytes()
+            if b"\x00" in raw[:8192]:
+                return f"Error: '{file_path}' looks like a binary file ({len(raw)} bytes); it cannot be shown as text."
+            content = raw.decode("utf-8", errors="replace").replace("\r\n", "\n")
+
+            offset = kwargs.get("offset")
+            limit = kwargs.get("limit")
+            if offset is None and limit is None:
+                if len(content) > MAX_TOOL_OUTPUT_CHARS:
+                    total = content.count("\n") + 1
+                    content += (
+                        f"\n\n[Note: file has {total} lines and will be shortened in the middle; "
+                        "use offset/limit to read the part you need.]"
+                    )
+                return content
+
+            lines = content.splitlines(keepends=True)
+            start = max(int(offset or 1), 1) - 1
+            end = len(lines) if limit is None else start + max(int(limit), 0)
+            if start >= len(lines):
+                return f"Error: offset {start + 1} is past the end of '{file_path}' ({len(lines)} lines)."
+            return f"[Lines {start + 1}-{min(end, len(lines))} of {len(lines)}]\n" + "".join(lines[start:end])
         except PermissionError as pe:
             return str(pe)
         except Exception as e:
@@ -160,9 +191,21 @@ class EditTool(BaseTool):
             if not target.is_file():
                 return f"Error: File '{file_path}' does not exist or is a directory."
 
-            # newline="" keeps the file's own line endings (no LF -> CRLF rewrite on Windows)
-            with open(target, "r", encoding="utf-8", errors="replace", newline="") as f:
-                current_text = f.read()
+            # newline="" keeps the file's own line endings (no LF -> CRLF rewrite on Windows).
+            # Strict decoding: writing back replacement characters would corrupt non-UTF-8 files.
+            try:
+                with open(target, "r", encoding="utf-8", newline="") as f:
+                    current_text = f.read()
+            except UnicodeDecodeError:
+                return (
+                    f"Error: '{file_path}' is not valid UTF-8 text; refusing to edit it to avoid corrupting it. "
+                    "Use Write to replace the whole file if that is intended."
+                )
+
+            # Read shows LF only, so match CRLF files by converting the model's text to CRLF
+            if "\r\n" in current_text and "\r\n" not in old_content:
+                old_content = old_content.replace("\n", "\r\n")
+                new_content = new_content.replace("\n", "\r\n")
 
             occurrences = current_text.count(old_content)
             if occurrences == 0:

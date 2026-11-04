@@ -3,7 +3,7 @@ Test suite for filesystem tools, shell execution, timeouts, and argument parsing
 """
 
 from pathlib import Path
-import pytest
+import sys
 
 from ai_agent.tools.base import ToolRegistry
 from ai_agent.tools.filesystem import EditTool, ListDirTool, ReadTool, WriteTool
@@ -150,3 +150,38 @@ def test_edit_keeps_line_endings(tmp_path: Path):
     edit_tool.execute(file_path="crlf.py", old_content="b = 2", new_content="b = 3")
     assert (tmp_path / "lf.py").read_bytes() == b"a = 1\nb = 3\n"
     assert (tmp_path / "crlf.py").read_bytes() == b"a = 1\r\nb = 3\r\n"
+
+
+def test_edit_multiline_on_crlf_file(tmp_path: Path):
+    (tmp_path / "w.py").write_bytes(b"a = 1\r\nb = 2\r\nc = 3\r\n")
+    # The model copies text from Read output, which uses LF only
+    assert "\r" not in ReadTool(tmp_path).execute(file_path="w.py")
+    res = EditTool(tmp_path).execute(file_path="w.py", old_content="a = 1\nb = 2", new_content="a = 1\nb = 20")
+    assert "edited successfully" in res
+    assert (tmp_path / "w.py").read_bytes() == b"a = 1\r\nb = 20\r\nc = 3\r\n"
+
+
+def test_edit_refuses_non_utf8(tmp_path: Path):
+    (tmp_path / "latin.txt").write_bytes("café = 1\n".encode("latin-1"))
+    res = EditTool(tmp_path).execute(file_path="latin.txt", old_content="= 1", new_content="= 2")
+    assert "not valid UTF-8" in res
+    assert (tmp_path / "latin.txt").read_bytes() == "café = 1\n".encode("latin-1")
+
+
+def test_read_line_range_and_binary(tmp_path: Path):
+    (tmp_path / "f.txt").write_text("".join(f"line{i}\n" for i in range(1, 11)))
+    (tmp_path / "b.bin").write_bytes(b"\x00\x01\x02")
+    read_tool = ReadTool(tmp_path)
+    res = read_tool.execute(file_path="f.txt", offset=3, limit=2)
+    assert res == "[Lines 3-4 of 10]\nline3\nline4\n"
+    assert "past the end" in read_tool.execute(file_path="f.txt", offset=50)
+    assert "binary" in read_tool.execute(file_path="b.bin")
+
+
+def test_normalize_python_command_launcher_and_pip():
+    exe = f'"{sys.executable}"'
+    assert normalize_python_command("py -3 x.py") == f"{exe} x.py"
+    assert normalize_python_command("cd a && py -3.11 -m pytest") == f"cd a && {exe} -m pytest"
+    assert normalize_python_command("pip install rich") == f"{exe} -m pip install rich"
+    assert normalize_python_command("mypy x.py") == "mypy x.py"
+    assert normalize_python_command("pipenv install") == "pipenv install"

@@ -8,18 +8,24 @@ import signal
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Callable, Optional
 from ..config import DEFAULT_SHELL_TIMEOUT
 from .base import BaseTool
 
 
 def normalize_python_command(command: str) -> str:
     """
-    Replace calls to python/python3/py with the active sys.executable,
+    Replace calls to python/python3/py (and pip/pip3) with the active sys.executable,
     respecting command start or chaining operators (&&, ||, ;, |).
+    The Windows launcher's version flag (py -3, py -3.11) is dropped since python.exe rejects it.
     """
     python_exe = f'"{sys.executable}"'
-    pattern = r'(^|[;&|]\s*)(?:python3?|py)(?=\s|$)'
+    command = re.sub(
+        r'(^|[;&|]\s*)pip3?(?=\s|$)',
+        lambda m: f'{m.group(1)}{python_exe} -m pip',
+        command,
+    )
+    pattern = r'(^|[;&|]\s*)(?:python3?|py(?:\s+-\d+(?:\.\d+)?(?:-\d+)?)?)(?=\s|$)'
     return re.sub(pattern, lambda m: f'{m.group(1)}{python_exe}', command)
 
 
