@@ -19,7 +19,7 @@ An autonomous, multi-modal interface AI agent built in Python leveraging native 
   * `Write`: Creates and updates files with automatic directory provisioning.
   * `Edit`: Fast in-place search-and-replace text editing without rewriting entire files.
   * `ListDir`: Native tree/directory inspection without spawning shell sub-processes.
-  * `Bash`: Terminal commands started in the workspace, with a timeout that kills the whole process tree (`--timeout`), dynamic Python runtime detection, and optional per-command approval (`--confirm`). Note: Bash is not sandboxed like the file tools; a command can reach outside the workspace.
+  * `Bash`: Terminal commands started in the workspace, with a timeout that kills the whole process tree (`--timeout`), dynamic Python runtime detection (`python`, `python3`, `py -3` and `pip` all run the agent's own interpreter), and optional per-command approval (`--confirm`). Note: Bash is not sandboxed like the file tools; a command can reach outside the workspace.
 * **Resilient Tool Parsing for Small & Local Models:**
   * Intercepts and parses tool calls emitted as text by local models (Qwen XML `<function><name>...</name>`, `<tool_call>`, markdown code fences, and raw JSON).
   * Automatically maps common tool aliases and hallucinations (e.g. `ListFilesCount`, `list_files`, `dir`, `read_file`, `shell`).
@@ -27,13 +27,15 @@ An autonomous, multi-modal interface AI agent built in Python leveraging native 
   * Unpacks conversational responses disguised as JSON objects by small models to prevent repetitive JSON reply loops.
 * **Cloud + Local LLM Support:** Toggle smoothly between cloud models via OpenRouter, alternative providers (Gemini, Groq, DeepSeek), or local zero-cost models via Ollama.
 * **Persistent Local Model Caching & Instant Tab Switching:** Fast disk cache (`.cache/openrouter_models_cache.json`, 24h TTL) and in-memory pre-caching eliminates UI latency, switching categories in under 1ms.
-* **Automated Multi-Key Rotation Across Providers:** Supports pooling multiple API keys in `API_KEYS_OPEN_ROUTER.txt`, `API_KEYS_GEMINI.txt`, `API_KEYS_GROQ.txt`, or `API_KEYS_DEEPSEEK.txt` with automatic in-flight rotation upon hitting 429 rate limits or daily quotas without losing conversation context.
+* **Automated Multi-Key Rotation Across Providers:** Supports pooling multiple API keys in `API_KEYS_OPEN_ROUTER.txt`, `API_KEYS_GEMINI.txt`, `API_KEYS_GROQ.txt`, or `API_KEYS_DEEPSEEK.txt` with automatic in-flight rotation upon hitting 429 rate limits or daily quotas without losing conversation context. Per-minute limits are retried on the same key first (waiting 2s, then 6s, or the server's `Retry-After` up to 30s), so a short RPM spike does not burn a key; daily-limit errors rotate immediately. Only real quota errors (HTTP 402/429 or explicit quota messages) trigger rotation.
 * **Hardware & Multi-Drive Awareness:** Built-in hardware scanner inspecting system RAM, GPU, and storage across all drives (including C: and secondary drives like D:) to evaluate model feasibility and prevent disk overflows.
 * **Provider-Aware Quota Telemetry:** Top status bar dynamically reports `Requests: Unlimited (Local)` for offline models, provider limits (`Gemini Free (1,500 RPD / 15 RPM)`, `Groq Free (30 RPM)`), or live OpenRouter request balances (`18/50 left`).
 * **Strict Sandbox & Traversal Protection:** All file operations are validated against the workspace root using `pathlib.Path.resolve().is_relative_to(sandbox_root)`, strictly forbidding directory traversal escapes (`../`).
 * **Fault-Tolerant & Safe:**
   * Timeout protection on API calls (`--api-timeout`) and subprocess executions.
   * Automatic UTF-8 stream reconfiguring to prevent Windows locale encoding errors.
+  * Shell output with non-ASCII text (e.g. Turkish file names from `dir`) is decoded correctly: child Python writes UTF-8 and Windows `cmd` output falls back to the console's OEM codepage.
+  * Long conversations stay within the model's context: once history passes ~120k characters (`AI_AGENT_MAX_CONTEXT_CHARS`), the oldest tool outputs are replaced with a short note. Messages are never dropped.
   * Live model discovery (`--list-models`) and smart fallback suggestions when endpoints hit rate limits.
 
 ---
@@ -84,7 +86,7 @@ An autonomous, multi-modal interface AI agent built in Python leveraging native 
 ## Getting Started
 
 ### Prerequisites
-* Python 3.9 or higher
+* Python 3.9 or higher (dependencies: `openai`, `rich`, `textual` 8+, `pyyaml`, `python-dotenv`)
 * An [OpenRouter](https://openrouter.ai/) account and API Key **OR** a local [Ollama](https://ollama.com/) instance.
 
 ### Installation
