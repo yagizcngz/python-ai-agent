@@ -109,6 +109,30 @@ def detect_language(path: Path) -> str:
     return ext_map.get(path.suffix.lower(), "text")
 
 
+# Colour roles: neutral chrome, one colour per speaker, so colour carries meaning.
+USER_COLOR = "#38bdf8"
+AGENT_COLOR = "#a78bfa"
+TOOL_COLOR = "#fbbf24"
+ERROR_COLOR = "#f87171"
+BORDER_COLOR = "#334155"
+MUTED_COLOR = "#94a3b8"
+
+
+def _summarize_tool_args(arguments, max_len: int = 60) -> str:
+    """One-line preview of tool arguments for the chat, e.g. 'src/app.py' or 'pytest -q'."""
+    try:
+        import json
+        parsed = json.loads(arguments) if isinstance(arguments, str) else arguments
+    except Exception:
+        parsed = arguments
+    if isinstance(parsed, dict):
+        value = next((v for v in parsed.values() if isinstance(v, str) and v.strip()), "")
+    else:
+        value = str(parsed or "")
+    value = " ".join(value.split())
+    return value if len(value) <= max_len else value[: max_len - 1] + "…"
+
+
 class ConfirmQuitModal(ModalScreen[bool]):
     """Modal dialog prompting user for confirmation before quitting."""
 
@@ -957,10 +981,9 @@ class AgentTUIApp(App):
     #status-bar {
         height: 1;
         width: 100%;
-        background: #1e293b;
-        color: #f8fafc;
+        background: #111827;
+        color: #e2e8f0;
         padding: 0 1;
-        text-style: bold;
     }
 
     #main-container {
@@ -983,10 +1006,19 @@ class AgentTUIApp(App):
     #chat-log {
         height: 1fr;
         min-height: 0;
-        border: heavy #38bdf8;
+        border: round #334155;
         background: #060911;
-        padding: 1;
-        scrollbar-size: 1 1;
+        padding: 1 2;
+        overflow-x: hidden;
+        scrollbar-size: 1 0;
+    }
+
+    #chat-log:focus, #files-box:focus-within, #tool-box:focus-within {
+        border: round #38bdf8;
+    }
+
+    #chat-log, #files-box, #tool-box {
+        border-title-color: #94a3b8;
     }
 
     #input-bar {
@@ -1000,13 +1032,13 @@ class AgentTUIApp(App):
     #user-input {
         width: 1fr;
         height: 3;
-        border: heavy #38bdf8;
+        border: round #334155;
         background: #0f172a;
         color: #f8fafc;
     }
 
     #user-input:focus {
-        border: heavy #7dd3fc;
+        border: round #38bdf8;
     }
 
     .action-btn {
@@ -1041,7 +1073,7 @@ class AgentTUIApp(App):
     #files-box {
         height: 1fr;
         min-height: 0;
-        border: heavy #c084fc;
+        border: round #334155;
         background: #060911;
         overflow: hidden hidden;
         scrollbar-size: 0 0;
@@ -1050,7 +1082,7 @@ class AgentTUIApp(App):
     #tool-box {
         height: 1fr;
         min-height: 0;
-        border: heavy #fbbf24;
+        border: round #334155;
         background: #060911;
         overflow: hidden hidden;
         scrollbar-size: 0 0;
@@ -1061,7 +1093,8 @@ class AgentTUIApp(App):
         min-height: 0;
         border: none;
         padding: 0 1;
-        scrollbar-size: 1 1;
+        overflow-x: hidden;
+        scrollbar-size: 1 0;
     }
 
     #file-tree {
@@ -1248,7 +1281,7 @@ class AgentTUIApp(App):
         with Horizontal(id="main-container"):
             # Left: Clean Conversation Screen & Input Bar
             with Vertical(id="chat-container"):
-                yield RichLog(id="chat-log", highlight=True, markup=True, wrap=True)
+                yield RichLog(id="chat-log", highlight=True, markup=True, wrap=True, min_width=1)
                 with Horizontal(id="input-bar"):
                     yield Input(
                         placeholder="Type a goal or prompt (e.g. 'Create a script calculate.py')...",
@@ -1263,7 +1296,7 @@ class AgentTUIApp(App):
                     yield Tree("Root", id="file-tree")
                 with Vertical(id="tool-box") as tb:
                     tb.border_title = "Tool Activity"
-                    yield RichLog(id="tool-log", highlight=True, markup=True, wrap=True)
+                    yield RichLog(id="tool-log", highlight=True, markup=True, wrap=True, min_width=1)
 
         with Horizontal(id="bottom-bar"):
             with Horizontal(id="bottom-right"):
@@ -1327,6 +1360,7 @@ class AgentTUIApp(App):
 
     def on_resize(self, event) -> None:
         """Dynamically adjust panel display on terminal resize."""
+        self.call_after_refresh(self.update_telemetry)  # re-align the status bar's right side
         if not self.is_chat_expanded:
             if event.size.height < 18 and self.current_view_mode == "split":
                 self.set_view_mode("files")
@@ -1344,25 +1378,21 @@ class AgentTUIApp(App):
         chat_log = self.query_one("#chat-log", RichLog)
         tool_log = self.query_one("#tool-log", RichLog)
 
-        chat_log.write(
-            Panel(
-                f"[bold #38bdf8]P Y T H O N   A I   A G E N T   [ O N L I N E ][/bold #38bdf8]\n"
-                f"WORKSPACE : [bold #fbbf24]{self.workspace_dir.name}[/bold #fbbf24] ({self.workspace_dir})\n"
-                f"STATUS    : [bold #34d399]READY FOR INSTRUCTIONS[/bold #34d399]",
-                title="[ S T A T U S ]",
-                border_style="#38bdf8",
-            )
-        )
-        tool_log.write(
-            Panel(
-                "Tool invocations (Bash, Read, Write, Edit, ListDir) stream here in real-time.",
-                title="[ T O O L   A C T I V I T Y ]",
-                border_style="#fbbf24",
-            )
-        )
+        welcome = Text()
+        welcome.append("Ready. ", style="bold #e2e8f0")
+        welcome.append(f"Working in {self.workspace_dir}\n", style=MUTED_COLOR)
+        welcome.append("Describe a task, e.g. ", style=MUTED_COLOR)
+        welcome.append("create calculate.py that prints factorials\n\n", style="italic #e2e8f0")
+        for key, label in (("Enter", "send"), ("Alt+S", "stop"), ("Alt+M", "model"), ("F1", "all keys")):
+            welcome.append(f" {key} ", style=f"bold #e2e8f0 on {BORDER_COLOR}")
+            welcome.append(f" {label}   ", style=MUTED_COLOR)
+        chat_log.write(welcome)
+        chat_log.write("")
+        tool_log.write(Text("Tool calls and their results appear here.", style=MUTED_COLOR))
 
         self.populate_file_tree()
         self.update_telemetry()
+        self.call_after_refresh(self.update_telemetry)  # once the bar has its real width
         if not self.is_local and is_openrouter_url(self.base_url):
             self.refresh_account_limits()
 
@@ -1494,13 +1524,10 @@ class AgentTUIApp(App):
             mode_desc = "Local Ollama" if self.is_local else get_provider_description(self.base_url)
 
             chat_log = self.query_one("#chat-log", RichLog)
-            chat_log.write(
-                Panel(
-                    f"Switched active model to [bold cyan]{self.model}[/bold cyan] ({mode_desc})",
-                    title="Model Changed",
-                    border_style="cyan",
-                )
-            )
+            notice = Text("  Model switched to ", style=MUTED_COLOR)
+            notice.append(self.model, style="bold #e2e8f0")
+            notice.append(f" ({mode_desc})", style=MUTED_COLOR)
+            chat_log.write(notice)
             self.notify(f"Switched to {self.model}", title="Model Updated")
         except Exception as e:
             self.notify(f"Failed to switch model: {e}", title="Error", severity="error")
@@ -1642,8 +1669,10 @@ class AgentTUIApp(App):
         chat_log.write(
             Panel(
                 Text(prompt),
-                title="[bold #38bdf8][ U S E R ][/bold #38bdf8]",
-                border_style="#38bdf8",
+                title=f"[bold {USER_COLOR}]You[/]",
+                title_align="left",
+                border_style=USER_COLOR,
+                padding=(0, 1),
             )
         )
 
@@ -1665,7 +1694,7 @@ class AgentTUIApp(App):
 
     def _handle_error(self, err_text: str) -> None:
         chat_log = self.query_one("#chat-log", RichLog)
-        chat_log.write(f"[bold red]Error: {escape(err_text)}[/bold red]")
+        chat_log.write(Text(f"Error: {err_text}", style=f"bold {ERROR_COLOR}"))
 
     def _finish_task(self) -> None:
         self.is_busy = False
@@ -1691,17 +1720,16 @@ class AgentTUIApp(App):
         self.query_one("#user-input", Input).focus()
 
     def update_telemetry(self, status_text: Optional[str] = None) -> None:
-        """Refresh single-line top status bar."""
+        """Refresh the top status bar: state and model on the left, usage on the right."""
         try:
             status = status_text or self.current_status
             if "RUNNING" in status:
-                st_color = "cyan"
+                pill_bg, label = TOOL_COLOR, status.replace("RUNNING: ", "RUNNING ")
             elif "THINKING" in status:
-                st_color = "yellow"
+                pill_bg, label = AGENT_COLOR, "THINKING"
             else:
-                st_color = "green"
+                pill_bg, label = "#34d399", status
 
-            tokens_str = f"{self.memory.total_prompt_tokens:,} in | {self.memory.total_completion_tokens:,} out"
             if self.is_local:
                 limits_text = "Requests: [bold green]Unlimited (Local)[/bold green]"
             elif not is_openrouter_url(self.base_url):
@@ -1709,14 +1737,22 @@ class AgentTUIApp(App):
             else:
                 limits_text = self.daily_limits_text
 
-            bar_text = (
-                f"Status: [bold {st_color}]{status}[/bold {st_color}] | "
-                f"Model: [bold cyan]{self.model}[/bold cyan] | "
-                f"{limits_text} | "
-                f"Tokens: {tokens_str} | "
-                f"Step: {self.current_step}/{self.agent.max_steps}"
+            left = Text()  # styles go on spans: a base style would colour the whole bar
+            left.append(f" {label} ", style=f"bold #0b0f19 on {pill_bg}")
+            left.append("  ")
+            left.append(self.model, style="bold #e2e8f0")
+
+            sep = f" [{MUTED_COLOR}]·[/] "
+            right = Text.from_markup(
+                f"{limits_text}{sep}"
+                f"[{MUTED_COLOR}]Tokens[/] {self.memory.total_prompt_tokens:,} in / "
+                f"{self.memory.total_completion_tokens:,} out{sep}"
+                f"[{MUTED_COLOR}]Step[/] {self.current_step}/{self.agent.max_steps}"
             )
-            self.query_one("#status-bar", Label).update(bar_text)
+
+            bar = self.query_one("#status-bar", Label)
+            gap = max(bar.content_size.width - left.cell_len - right.cell_len, 3)
+            bar.update(left + Text(" " * gap) + right)
         except Exception:
             pass
 
@@ -1791,8 +1827,12 @@ class AgentTUIApp(App):
         elif event.event_type == AgentEventType.THINKING:
             self.current_status = "THINKING"
             self.update_telemetry()
-            chat_log.write(f"[dim #fbbf24]► [ T H I N K I N G ] {escape(str(event.data))} [ █ ][/dim #fbbf24]")
-            tool_log.write(f"[dim italic]--- Step {event.step}: Thinking... ---[/dim italic]")
+            # Routine "Consulting model" progress lives in the status bar; only notable notices
+            # (key rotation, rate-limit waits) are worth a line in the chat.
+            message = str(event.data)
+            if not message.startswith("Consulting model"):
+                chat_log.write(Text(f"  {message}", style=f"italic {MUTED_COLOR}"))
+            tool_log.write(Text(f"── Step {event.step} ──", style=MUTED_COLOR))
 
         elif event.event_type == AgentEventType.TOOL_CALL:
             data = event.data
@@ -1810,14 +1850,20 @@ class AgentTUIApp(App):
             elif self.current_view_mode == "files":
                 self.set_view_mode("tools")
 
-            chat_log.write(f"[dim #38bdf8]► [ E X E C U T I N G ] {fn_name} [ █ ][/dim #38bdf8]")
+            line = Text("  ▸ ", style=MUTED_COLOR)
+            line.append(fn_name, style=f"bold {TOOL_COLOR}")
+            summary = _summarize_tool_args(fn_args)
+            if summary:
+                line.append(f"  {summary}", style=MUTED_COLOR)
+            chat_log.write(line)
 
-            # Route tool calls exclusively to the dedicated Tool Activity panel
+            # Full arguments go to the dedicated Tool Activity panel
             tool_log.write(
                 Panel(
                     Syntax(fn_args, "json", theme="monokai", word_wrap=True),
-                    title=f"[bold #fbbf24][ T O O L : {fn_name} ][/bold #fbbf24]",
-                    border_style="#fbbf24",
+                    title=f"[bold {TOOL_COLOR}]{escape(fn_name)}[/]",
+                    title_align="left",
+                    border_style=BORDER_COLOR,
                 )
             )
 
@@ -1831,8 +1877,9 @@ class AgentTUIApp(App):
             tool_log.write(
                 Panel(
                     Text(preview),
-                    title=f"[bold #38bdf8][ R E S U L T : {fn_name} ][/bold #38bdf8]",
-                    border_style="#38bdf8",
+                    title=f"[{MUTED_COLOR}]{escape(fn_name)} result[/]",
+                    title_align="left",
+                    border_style=BORDER_COLOR,
                 )
             )
 
@@ -1841,8 +1888,10 @@ class AgentTUIApp(App):
             chat_log.write(
                 Panel(
                     RichMarkdown(event.data),
-                    title="[bold #c084fc][ A G E N T   A N S W E R ][/bold #c084fc]",
-                    border_style="#c084fc",
+                    title=f"[bold {AGENT_COLOR}]Agent[/]",
+                    title_align="left",
+                    border_style=AGENT_COLOR,
+                    padding=(0, 1),
                 )
             )
             self.update_telemetry()
@@ -1852,9 +1901,11 @@ class AgentTUIApp(App):
             err_msg = err_data.get("error") if isinstance(err_data, dict) else str(err_data)
             chat_log.write(
                 Panel(
-                    f"[bold red]{escape(str(err_msg))}[/bold red]",
-                    title="[bold red][ E R R O R ][/bold red]",
-                    border_style="red",
+                    Text(str(err_msg), style=ERROR_COLOR),
+                    title=f"[bold {ERROR_COLOR}]Error[/]",
+                    title_align="left",
+                    border_style=ERROR_COLOR,
+                    padding=(0, 1),
                 )
             )
 
