@@ -4,6 +4,7 @@ Supports automatic failover across multiple keys in API_KEYS_OPEN_ROUTER.txt.
 """
 
 import os
+import re
 from pathlib import Path
 from typing import List, Optional, Tuple
 from ..config import PROJECT_ROOT
@@ -14,21 +15,25 @@ def is_quota_or_rate_limit_error(e: Exception) -> bool:
     status_code = getattr(e, "status_code", None)
     if status_code in (402, 429):
         return True
+    if isinstance(status_code, int):
+        # A real HTTP error with another status (400 bad request, 404 unknown model, 500...)
+        # is not a quota problem; rotating would wrongly mark a good key as exhausted.
+        return False
 
     msg = str(e).lower()
-    quota_keywords = [
+    if re.search(r"\b(429|402)\b", msg):
+        return True
+    quota_phrases = [
         "rate limit",
         "rate_limit",
-        "429",
         "quota",
-        "credit",
-        "402",
+        "insufficient credit",
+        "insufficient_quota",
         "daily limit",
         "usage limit",
-        "insufficient",
         "free model daily",
     ]
-    return any(keyword in msg for keyword in quota_keywords)
+    return any(phrase in msg for phrase in quota_phrases)
 
 
 class KeyManager:

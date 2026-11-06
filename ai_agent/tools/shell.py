@@ -29,6 +29,25 @@ def normalize_python_command(command: str) -> str:
     return re.sub(pattern, lambda m: f'{m.group(1)}{python_exe}', command)
 
 
+def decode_output(data: bytes) -> str:
+    """
+    Decode command output. Child Python processes are told to write UTF-8; Windows cmd
+    built-ins (dir, type, echo) write in the console's OEM codepage (e.g. cp857 for Turkish),
+    so fall back to that when the bytes are not valid UTF-8.
+    """
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            return data.decode(f"cp{ctypes.windll.kernel32.GetOEMCP()}", errors="replace")
+        except Exception:
+            pass
+    return data.decode("utf-8", errors="replace")
+
+
 class BashTool(BaseTool):
     """Execute shell commands strictly anchored in the workspace directory."""
 
@@ -79,9 +98,8 @@ class BashTool(BaseTool):
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
                 cwd=str(self.workspace_dir),
-                errors="replace",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"},
                 start_new_session=sys.platform != "win32",
             )
             try:
@@ -97,8 +115,8 @@ class BashTool(BaseTool):
                     os.killpg(process.pid, signal.SIGKILL)
                 process.communicate()
                 raise
-            stdout = stdout.strip()
-            stderr = stderr.strip()
+            stdout = decode_output(stdout).strip()
+            stderr = decode_output(stderr).strip()
 
             result_parts = []
             if process.returncode != 0:

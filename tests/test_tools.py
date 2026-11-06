@@ -185,3 +185,14 @@ def test_normalize_python_command_launcher_and_pip():
     assert normalize_python_command("pip install rich") == f"{exe} -m pip install rich"
     assert normalize_python_command("mypy x.py") == "mypy x.py"
     assert normalize_python_command("pipenv install") == "pipenv install"
+
+
+def test_bash_output_keeps_non_ascii_text(tmp_path: Path):
+    bash_tool = BashTool(tmp_path)
+    # Child Python is told to write UTF-8
+    res = bash_tool.execute(command='python -c "print(chr(351) + chr(287) + chr(304))"')
+    assert "şğİ" in res
+    if sys.platform == "win32":
+        # cmd built-ins write in the OEM codepage (cp857 for Turkish), not UTF-8
+        (tmp_path / "çalış.txt").write_text("x")
+        assert "çalış.txt" in bash_tool.execute(command="dir /b")

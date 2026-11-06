@@ -24,6 +24,13 @@ def test_is_quota_or_rate_limit_error():
     assert not is_quota_or_rate_limit_error(Exception("Network socket timeout"))
     assert not is_quota_or_rate_limit_error(Exception("SyntaxError in user script"))
 
+    # Unrelated errors that merely contain quota-like words must not burn a key
+    bad_request = Exception("Error code: 400 - insufficient context length for this request")
+    bad_request.status_code = 400
+    assert not is_quota_or_rate_limit_error(bad_request)
+    assert not is_quota_or_rate_limit_error(Exception("Model accreditation-402b-instruct not found"))
+    assert not is_quota_or_rate_limit_error(Exception("Insufficient permissions to read file"))
+
 
 def test_key_manager_rotation(tmp_path):
     key_file = tmp_path / "keys.txt"
